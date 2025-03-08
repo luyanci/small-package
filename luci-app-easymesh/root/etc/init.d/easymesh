@@ -2,6 +2,8 @@
 START=99
 STOP=70
 
+USE_PROCD=1
+
 load_easymesh_config() {
 	enable=$(uci -q get easymesh.config.enabled)
 	mesh_bat0=$(uci -q get network.bat0)
@@ -15,6 +17,7 @@ load_easymesh_config() {
 	ap_ipaddr1=$(sed -n '1p' /etc/easymesh 2>/dev/null)
 	apRadio=$(uci -q get easymesh.config.apRadio)
 	kvr=$(uci -q get easymesh.config.kvr)
+	r_2g=$(uci -q get easymesh.config.r_2g)
 	iapp=$(uci -q get easymesh.config.iapp)
 	brlan=$(uci -q get network.@device[0].name)
 	role=$(uci -q get easymesh.config.role)
@@ -92,22 +95,30 @@ add_kvr() {
 	kvr=$(uci -q get easymesh.config.kvr)
 	mobility_domain=$(uci -q get easymesh.config.mobility_domain)
 	iapp=$(uci -q get easymesh.config.iapp)
+	r_2g=$(uci -q get easymesh.config.r_2g)
+	ap_2g=$(uci -X show wireless | grep 2g | awk -F'[.=]' '{print $2}')
 	for apall in $(uci -X show wireless | grep wifi-device | awk -F'[.=]' '{print $2}'); do
 		if [ "$kvr" = 1 ]; then
+			uci set wireless.default_$apall.encryption='psk2+ccmp'
 			uci set wireless.default_$apall.ieee80211k='1'
 			uci set wireless.default_$apall.rrm_neighbor_report='1'
 			uci set wireless.default_$apall.rrm_beacon_report='1'
 			uci set wireless.default_$apall.ieee80211v='1'
 			uci set wireless.default_$apall.bss_transition='1'
-			uci set wireless.default_$apall.ieee80211r='1'
-			uci set wireless.default_$apall.encryption='psk2+ccmp'
-			uci set wireless.default_$apall.mobility_domain=$mobility_domain
-			uci set wireless.default_$apall.ft_over_ds='1'
-			uci set wireless.default_$apall.ft_psk_generate_local='1'
+			if [ "$apall" != "$ap_2g" ] || [ "$r_2g" = 1 ]; then
+				uci set wireless.default_$apall.ieee80211r='1'
+				uci set wireless.default_$apall.mobility_domain=$mobility_domain
+				uci set wireless.default_$apall.ft_over_ds='0'
+				uci set wireless.default_$apall.reassociation_deadline='20000'
+				uci set wireless.default_$apall.ft_psk_generate_local='1'
+			else
+				uci -q delete wireless.default_$apall.ieee80211r
+			fi
 			uci commit wireless
 		else
 			uci -q delete wireless.default_$apall.ieee80211k
 			uci -q delete wireless.default_$apall.ieee80211v
+			uci -q delete wireless.default_$apall.bss_transition
 			uci -q delete wireless.default_$apall.ieee80211r
 			uci commit wireless
 		fi
@@ -123,12 +134,20 @@ add_kvr() {
 
 add_dawn() {
 	kvr=$(uci -q get easymesh.config.kvr)
+	r_2g=$(uci -q get easymesh.config.r_2g)
 	rssi_val=$(uci -q get easymesh.config.rssi_val)
 	low_rssi_val=$(uci -q get easymesh.config.low_rssi_val)
 
 	if [ "$kvr" = 1 ]; then
-		uci set dawn.@metric[0].rssi_val=$rssi_val
-		uci set dawn.@metric[0].low_rssi_val=$low_rssi_val
+		uci set dawn.802_11g.rssi_val=$rssi_val
+		uci set dawn.802_11g.low_rssi_val=$low_rssi_val
+		if [ "$r_2g" = 1 ]; then
+			uci set dawn.802_11a.rssi_val=$rssi_val
+			uci set dawn.802_11a.low_rssi_val=$low_rssi_val
+		else
+			uci set dawn.802_11a.rssi_val='-60'
+			uci set dawn.802_11a.low_rssi_val='-80'
+		fi
 		uci commit dawn
 		/etc/init.d/dawn enable && /etc/init.d/dawn start
 	else
@@ -245,17 +264,14 @@ set_easymesh() {
 			ap_mode_stop
 		fi
 	fi
-	/etc/init.d/network restart
+	/etc/init.d/network reload
 }
 
-start() {
-	return 0
-}
-
-stop() {
-	return 0
-}
-
-restart() {
+start_service() {
 	set_easymesh
 }
+
+service_triggers() {
+	procd_add_reload_trigger "easymesh"
+}
+
