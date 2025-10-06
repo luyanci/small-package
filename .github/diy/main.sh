@@ -1,3 +1,4 @@
+
 #!/bin/bash
 function git_clone() {
   git clone --depth 1 $1 $2 || true
@@ -267,4 +268,3 @@ sed -i 's/PKG_SOURCE_DATE:=2/PKG_SOURCE_DATE:=3/' transmission-web-control/Makef
 find . -type f -name "update.sh" -exec rm -f {} \;
 rm -rf adguardhome/patches
 exit 0
-
